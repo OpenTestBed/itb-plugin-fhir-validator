@@ -1,0 +1,43 @@
+# CANONICAL COPY — this plugin repo is the source of truth for the dialect.
+# The test-workbench copy under public/components/<id>/ is GENERATED via
+# `node itb-cli/src/sync-dialects.mjs`. Runtime fields (docker, healthCheck)
+# here are legacy; ../itb-plugin.yaml is authoritative for runtime.
+# Test Image Component: FHIR Validator
+# Provides FHIR resource validation against profiles and IGs
+id: fhir-validator
+name: FHIR Validator
+version: "1.0"
+description: >
+  FHIR server with $validate support. Validates resources against
+  StructureDefinitions and Implementation Guides.
+
+docker:
+  image: hapiproject/hapi:latest
+  ports:
+    - "8088:8081"
+  environment:
+    - hapi.fhir.validation.enabled=true
+
+healthCheck:
+  method: GET
+  path: /itb/fhir/definition
+  expect:
+    status: 200
+
+actors:
+  - id: FHIRValidator
+    description: FHIR validation server
+
+services:
+  - handler: FHIRValidator
+    path: /itb/fhir
+  - handler: FHIRPathProcessor
+    path: /itb/fhirpath
+  - handler: MatchetypeProcessor
+    path: /itb/matchetype
+  - handler: TestDataGenerator
+    path: /itb/testdata
+  - handler: ValidationResultsProcessor
+    path: /itb/validationResults
+
+language: steps.yml

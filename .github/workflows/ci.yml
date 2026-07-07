@@ -1,0 +1,16 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate manifest against registry schema
+        run: npx itb-cli registry validate .
+      - name: Boot itb-starter + this fragment; run starter suite
+        run: npx itb-cli dev smoke .
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: smoke
+    runs-on: ubuntu-latest
+    steps: [{ name: Push GHCR image + GitHub release, run: echo TODO }]
