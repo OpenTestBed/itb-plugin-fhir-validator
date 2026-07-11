@@ -1,0 +1,5 @@
+{
+  "packageServers": [
+    { "url": "http://package-server:8000", "authenticationType": "none" }
+  ]
+}

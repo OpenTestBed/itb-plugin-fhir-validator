@@ -11,6 +11,10 @@ services:
     working_dir: /app
     volumes:
       - fhir-validator-cache:/app
+      # Local package registry first (itb-plugin-package-server); unknown
+      # packages fall through to the public servers. Path resolves against
+      # the compose project dir (itb-starter/).
+      - ${FHIR_SETTINGS:-../itb-plugin-fhir-validator/fhir-settings.json}:/root/.fhir/fhir-settings.json:ro
     environment:
       - JAVA_TOOL_OPTIONS=${FHIR_VALIDATOR_JAVA_TOOL_OPTIONS:--Xmx8g}
       - VALIDATOR_URL=${VALIDATOR_URL:-https://github.com/costateixeira/org.hl7.fhir.core/releases/download/wip/validator_cli.jar}
