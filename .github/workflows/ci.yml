@@ -1,16 +1,24 @@
 name: ci
 on: [push, pull_request]
 jobs:
-  smoke:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      # The validator is vendored from itb-cli (src/registry-validate.mjs is
+      # canonical) so CI needs no access to the private itb-cli repo.
+      - name: Install validator dependency
+        run: npm install --no-save --no-audit --no-fund js-yaml
       - name: Validate manifest against registry schema
-        run: npx itb-cli registry validate .
-      - name: Boot itb-starter + this fragment; run starter suite
-        run: npx itb-cli dev smoke .
+        run: node scripts/registry-validate.mjs .
+      # `dev smoke` (boot itb-starter + this fragment, run the starter suite)
+      # is deferred until itb-cli grows that command — validating the manifest,
+      # compose fragment rules, and dialect (incl. language versioning) is the
+      # CI gate for now.
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: smoke
+    needs: validate
     runs-on: ubuntu-latest
     steps: [{ name: Push GHCR image + GitHub release, run: echo TODO }]
