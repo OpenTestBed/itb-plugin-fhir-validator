@@ -40,4 +40,8 @@ services:
   - handler: ValidationResultsProcessor
     path: /itb/validationResults
 
-language: steps.yml
+language:
+  steps: steps.yml
+  version: "1.0.0"        # this extension's own language version
+  base: itb-core-en        # base language this extension is written against
+  baseVersion: ">=1 <2"    # compatible core specVersion range (semver)

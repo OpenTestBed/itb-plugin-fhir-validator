@@ -16,6 +16,12 @@ runtime:
       image: eclipse-temurin:17-jre
       port: 8080
       healthcheck: /itb/fhir/getModuleDefinition
+    gherkin-dialect:
+      # Self-describing dialect endpoint (well-known /gherkin-dialect path,
+      # CORS-enabled) — sidecar until the main image can serve static files.
+      image: nginx:1.27-alpine
+      port: 8080
+      healthcheck: /gherkin-dialect/component.yml
 
 endpoints:                       # → ITB domain parameters; suites use $DOMAIN{...}
   fhirValidator:   http://fhir-validator:8080/itb/fhir
@@ -41,6 +47,9 @@ starterSuite: { path: suite/, specification: plugin-smoke }
 dialect:
   path: dialect/
   namespace: fhir
+  # Served by the deployed plugin at the well-known path (gherkin-dialect
+  # sidecar service) — the authoring app loads it from a running deployment.
+  endpoint: /gherkin-dialect
 
 config:
   FHIR_VALIDATOR_JAVA_TOOL_OPTIONS: { default: "-Xmx8g", description: "MEOW + transitive deps can push past 4G" }
