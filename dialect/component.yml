@@ -7,6 +7,10 @@
 id: fhir-validator
 name: FHIR Validator
 version: "1.0"
+# Dialect spec range this app build satisfies (optional). The dialect spec
+# (language.version below) is authoritative: if it falls outside this range,
+# THIS APP is out of date — diagnostics point here, not at the dialect.
+implementsDialect: "^1.0"
 description: >
   FHIR server with $validate support. Validates resources against
   StructureDefinitions and Implementation Guides.

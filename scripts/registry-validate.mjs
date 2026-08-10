@@ -44,6 +44,39 @@ export function validRange(range) {
   return range.trim().split(/\s+/).every(p => RANGE_PART_RE.test(p));
 }
 
+// Evaluate the same semver-lite subset (mirrors satisfiesRange in the
+// workbench's languageCatalog.ts — keep the two in sync).
+function parseVer(v) {
+  const m = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(String(v).trim());
+  return m ? [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)] : null;
+}
+function cmpVer(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  return 0;
+}
+export function satisfies(version, range) {
+  const v = parseVer(version);
+  if (!v || !validRange(range)) return false;
+  for (const part of range.trim().split(/\s+/)) {
+    const m = /^(>=|<=|>|<|=|\^|~)?\s*(.+)$/.exec(part);
+    const op = m[1] || '=';
+    const b = parseVer(m[2]);
+    const c = cmpVer(v, b);
+    let ok;
+    switch (op) {
+      case '>=': ok = c >= 0; break;
+      case '<=': ok = c <= 0; break;
+      case '>': ok = c > 0; break;
+      case '<': ok = c < 0; break;
+      case '^': ok = c >= 0 && v[0] === b[0]; break;
+      case '~': ok = c >= 0 && v[0] === b[0] && v[1] === b[1]; break;
+      default: ok = c === 0;
+    }
+    if (!ok) return false;
+  }
+  return true;
+}
+
 export function validatePluginDir(dir) {
   const errors = [];
   const warnings = [];
@@ -111,6 +144,32 @@ export function validatePluginDir(dir) {
   // starter suite
   if (m.starterSuite?.path && !exists(m.starterSuite.path)) {
     err(MF, `starterSuite.path ${m.starterSuite.path} does not exist`);
+  }
+
+  // ── app → dialect-spec drift (component.yml implementsDialect) ─────
+  // Three independent version axes — don't confuse them:
+  //   component.yml version            = the app/component build
+  //   component.yml language.version   = the dialect spec itself
+  //   component.yml language.baseVersion = dialect → core-spec compatibility
+  // implementsDialect (root-level, optional) closes the missing direction:
+  // the range of dialect specs this app build satisfies. The dialect spec is
+  // authoritative — a mismatch means THE APP is out of date, so the
+  // diagnostic points at the app. Absent field = no check, no noise.
+  const compFileForDrift = m.dialect
+    ? path.join(typeof m.dialect.path === 'string' ? m.dialect.path.replace(/steps\.yml$/, '') : 'dialect/', 'component.yml')
+    : null;
+  if (compFileForDrift && exists(compFileForDrift)) {
+    let comp;
+    try { comp = yaml.load(read(compFileForDrift)); } catch { comp = null; }
+    const range = comp?.implementsDialect;
+    const specVer = typeof comp?.language === 'object' ? comp?.language?.version : undefined;
+    if (range != null) {
+      if (typeof range !== 'string' || !validRange(range)) {
+        warn(compFileForDrift, `implementsDialect is not a valid range (${JSON.stringify(range)}) — drift check skipped`);
+      } else if (specVer && SEMVER_RE.test(String(specVer)) && !satisfies(String(specVer), range)) {
+        err(compFileForDrift, `app (version ${JSON.stringify(comp?.version)}) declares implementsDialect ${JSON.stringify(range)} but ships dialect spec ${specVer} — the app is out of date; update the app (and its implementsDialect), not the dialect`);
+      }
+    }
   }
 
   // ── dialect (language extension) ───────────────────────────────────
