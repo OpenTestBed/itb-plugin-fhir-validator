@@ -10,7 +10,7 @@ version: "1.0"
 # Dialect spec range this app build satisfies (optional). The dialect spec
 # (language.version below) is authoritative: if it falls outside this range,
 # THIS APP is out of date — diagnostics point here, not at the dialect.
-implementsDialect: "^1.0"
+implementsDialect: "^2.0"
 description: >
   FHIR server with $validate support. Validates resources against
   StructureDefinitions and Implementation Guides.
@@ -45,7 +45,8 @@ services:
     path: /itb/validationResults
 
 language:
-  steps: steps.yml
-  version: "1.0.0"        # this extension's own language version
+  steps: steps.yml         # generation-2 dialect (typed `text:` verbs)
+  legacy: steps-v1.yml     # generation-1 dialect, for files tagged @lang:itb-core-en@^1
+  version: "2.0.0"         # this extension's own language version
   base: itb-core-en        # base language this extension is written against
-  baseVersion: ">=1 <2"    # compatible core specVersion range (semver)
+  baseVersion: ">=1 <3"    # compatible core specVersion range (semver)
