@@ -141,7 +141,7 @@ conforms:
       when: '$ignore'
     - process: { handler: 'JsonPointerProcessor', operation: 'process', output: 'conformanceErrors', inputs: { content: '$lastRequest{response}{body}', pointer: '"/output/0/value"' } }
       when: '$ignore'
-    - log: 'concat("conforms: ", $validationErrors, " errors reported, ", $conformanceErrors, " counted after ignoring \"$ignore\"")'
+    - log: 'concat("conforms: ", $validationErrors, " errors reported, ", $conformanceErrors, " counted after ignoring ''$ignore''")'
       when: '$ignore'
 
 verbs:
@@ -225,7 +225,7 @@ verbs:
     output: { type: 'fhir:OperationOutcome' }
     actions:
       - *headers
-      - assign: { to: 'validateTplParams{resource}', value: '$2' }
+      - assign: { to: 'validateTplParams{resource}', value: '$2', type: 'string' }
       - assign: { to: 'validateTplParams{profiles}', value: '"$3"' }
       - process:
           handler: 'TemplateProcessor'
@@ -257,7 +257,7 @@ verbs:
     doc: Validate with options (bestPractice, resourceId) via the validator's processing service.
     actions:
       - *headers
-      - assign: { to: 'validateTplParams{resource}', value: '$2' }
+      - assign: { to: 'validateTplParams{resource}', value: '$2', type: 'string' }
       - assign: { to: 'validateTplParams{profiles}', value: '"$3"' }
       - assign: { to: 'validateTplParams{bpWarnings}', value: '"$opt.bestPractice"' }
       - assign: { to: 'validateTplParams{resourceIdRule}', value: '"$opt.resourceId"' }
@@ -290,7 +290,7 @@ verbs:
     doc: Validate against the base FHIR profile for the resource type and assert no errors.
     actions:
       - *headers
-      - assign: { to: 'validateTplParams{resource}', value: '$1' }
+      - assign: { to: 'validateTplParams{resource}', value: '$1', type: 'string' }
       - assign: { to: 'validateTplParams{resourceType}', value: '"$2"' }
       - process:
           handler: 'TemplateProcessor'
@@ -329,7 +329,7 @@ verbs:
     doc: Evaluate a FHIRPath expression on any value and bind the result.
     actions:
       - *headers
-      - assign: { to: 'fhirpathTplParams{resource}', value: '$3' }
+      - assign: { to: 'fhirpathTplParams{resource}', value: '$3', type: 'string' }
       - assign: { to: 'fhirpathTplParams{expression}', value: '"$2"' }
       - process:
           handler: 'TemplateProcessor'
@@ -356,7 +356,7 @@ verbs:
     doc: Assert a boolean FHIRPath expression through the validator's assertion service.
     actions:
       - *headers
-      - assign: { to: 'assertTplParams{resource}', value: '$1' }
+      - assign: { to: 'assertTplParams{resource}', value: '$1', type: 'string' }
       - assign: { to: 'assertTplParams{expression}', value: '"$2"' }
       - process:
           handler: 'TemplateProcessor'
@@ -389,7 +389,7 @@ verbs:
     doc: Compare a resource against a matchetype pattern; the report must be SUCCESS.
     actions:
       - *headers
-      - assign: { to: 'matchTplParams{resource}', value: '$1' }
+      - assign: { to: 'matchTplParams{resource}', value: '$1', type: 'string' }
       - assign: { to: 'matchTplParams{matchetype}', value: "'$docString'" }
       - process:
           handler: 'TemplateProcessor'
@@ -419,7 +419,7 @@ verbs:
     doc: Compare a resource against a matchetype pattern; the report must be FAILURE.
     actions:
       - *headers
-      - assign: { to: 'matchTplParams{resource}', value: '$1' }
+      - assign: { to: 'matchTplParams{resource}', value: '$1', type: 'string' }
       - assign: { to: 'matchTplParams{matchetype}', value: "'$docString'" }
       - process:
           handler: 'TemplateProcessor'
@@ -454,7 +454,7 @@ verbs:
     doc: Count an OperationOutcome's issues into $x.errors / $x.warnings / $x.infos.
     actions:
       - *headers
-      - assign: { to: 'summarizeTplParams{outcome}', value: '$2' }
+      - assign: { to: 'summarizeTplParams{outcome}', value: '$2', type: 'string' }
       - process:
           handler: 'TemplateProcessor'
           operation: 'process'
@@ -691,7 +691,7 @@ verbs:
             syntax: '"freemarker"'
             template: "'${accum}]'"
             parameters: '$closeOpsTplParams'
-      - assign: { to: 'modifyTplParams{resource}', value: '$2' }
+      - assign: { to: 'modifyTplParams{resource}', value: '$2', type: 'string' }
       - assign: { to: 'modifyTplParams{operations}', value: '$opsJson' }
       - assign: { to: 'modifyTplParams{profile}', value: '"$3"' }
       - process:
@@ -765,7 +765,7 @@ verbs:
           desc: 'Transform input $$2 is non-empty'
           inputs: { expression: 'not($2 = "")' }
       - *headers
-      - assign: { to: 'transformTplParams{content}', value: '$2' }
+      - assign: { to: 'transformTplParams{content}', value: '$2', type: 'string' }
       - assign: { to: 'transformTplParams{map}', value: '"$3"' }
       - process:
           handler: 'TemplateProcessor'
@@ -797,7 +797,7 @@ verbs:
     output: { type: 'fhir:Resource' }
     actions:
       - *headers
-      - assign: { to: 'parseFmlTplParams{content}', value: '$2' }
+      - assign: { to: 'parseFmlTplParams{content}', value: '$2', type: 'string' }
       - assign: { to: 'parseFmlTplParams{name}', value: '"$2.raw"' }
       - process:
           handler: 'TemplateProcessor'
@@ -828,7 +828,7 @@ verbs:
     doc: Register a StructureMap (or any resource) on the validator so transforms can resolve it by canonical.
     actions:
       - *headers
-      - assign: { to: 'regSmTplParams{content}', value: '$2' }
+      - assign: { to: 'regSmTplParams{content}', value: '$2', type: 'string' }
       - process:
           handler: 'TemplateProcessor'
           operation: 'process'
