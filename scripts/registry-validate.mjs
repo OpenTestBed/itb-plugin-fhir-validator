@@ -7,9 +7,14 @@
 //                        version/base/baseVersion against the core spec)
 //   - starterSuite path
 //
-// CANONICAL COPY — plugin repos vendor this file (scripts/registry-validate.mjs)
-// so their CI needs no PAT for the private itb-cli repo; keep changes here and
-// re-copy (candidate for a sync-dialects-style sync).
+// CANONICAL COPY — itb-plugins/scripts/registry-validate.mjs. Plugin repos
+// vendor it verbatim (scripts/registry-validate.mjs) so their CI needs no PAT
+// for the private itb-cli repo. Change it here, then re-copy to every vendored
+// copy; `node scripts/registry-validate.mjs --check-copies <dir>...` reports
+// any that have drifted.
+//
+// NOTE: an earlier comment claimed itb-cli/src/registry-validate.mjs was
+// canonical. That file does not exist.
 //
 // Usage: node bin/itb-suite.mjs registry validate <dir>
 //        node src/registry-validate.mjs <dir>          (standalone/vendored)
@@ -77,6 +82,73 @@ export function satisfies(version, range) {
   return true;
 }
 
+// ── dialect steps: both language generations ─────────────────────────
+// Generation 1 is `steps:` with a hand-written `match:` regex. Generation 2 is
+// `verbs:` with a typed `text:` sentence. A file may carry both while it is
+// being migrated, and a dialect that only serves generation-1 features ships
+// its verbs in the separate file named by component.yml `language.legacy`.
+
+/** Placeholder types the core language compiles. An unknown one THROWS at
+ *  catalog-merge time, which breaks every feature in the project — not just
+ *  the ones using this dialect — so it has to be caught here. */
+const PARAM_TYPES = new Set([
+  'actor', 'var', 'ref', 'value', 'string', 'path', 'url', 'canonical',
+  'int', 'word', 'kind', 'type',
+]);
+const KIND_RE = /^[a-z][a-z0-9-]*$/;
+
+export function validateSteps(steps, SF, err, warn) {
+  const gen1 = Array.isArray(steps?.steps) ? steps.steps : (Array.isArray(steps) ? steps : []);
+  const gen2 = Array.isArray(steps?.verbs) ? steps.verbs : [];
+
+  if (gen1.length === 0 && gen2.length === 0) {
+    err(SF, 'no steps found — expected a `verbs:` list (generation 2) or a `steps:` list (generation 1)');
+    return;
+  }
+
+  gen1.forEach((s, i) => {
+    if (!s?.match) { err(SF, `steps[${i}]: match missing`); return; }
+    try { new RegExp(s.match); } catch (e) { err(SF, `steps[${i}]: match is not a valid regex: ${e.message}`); }
+    if (!Array.isArray(s.actions) || s.actions.length === 0) err(SF, `steps[${i}] (${s.match}): actions missing`);
+  });
+
+  gen2.forEach((v, i) => {
+    if (typeof v?.text !== 'string' || !v.text.trim()) {
+      err(SF, `verbs[${i}]: text missing — a verb without a string \`text:\` is silently skipped by the compiler`);
+      return;
+    }
+    // Unterminated brace, then unknown placeholder name. Both throw in the
+    // compiler rather than producing a diagnostic.
+    const braces = (v.text.match(/\{/g) || []).length - (v.text.match(/\}/g) || []).length;
+    if (braces !== 0) err(SF, `verbs[${i}] (${v.text}): unbalanced { } in text`);
+    for (const m of v.text.matchAll(/\{([A-Za-z]+)(?::([^}]+))?\}/g)) {
+      if (!PARAM_TYPES.has(m[1])) {
+        err(SF, `verbs[${i}] (${v.text}): unknown placeholder {${m[1]}} — this throws at catalog load and breaks EVERY feature in the project, not only ones using this dialect`);
+      }
+      if (m[1] === 'actor' && m[2] && !KIND_RE.test(m[2])) {
+        err(SF, `verbs[${i}] (${v.text}): actor kind "${m[2]}" must match ${KIND_RE}`);
+      }
+    }
+    if (!Array.isArray(v.actions) || v.actions.length === 0) {
+      warn(SF, `verbs[${i}] (${v.text}): no actions — the step matches and emits nothing`);
+    }
+    if (v.requires !== undefined) {
+      warn(SF, `verbs[${i}] (${v.text}): \`requires:\` warns on every compile because the CLI never populates the service list — drop it`);
+    }
+  });
+
+  // An actor kind that is not lower-kebab can never be written in a feature,
+  // because the core's `is a/an {kind}` sentence will not match it.
+  for (const k of steps?.kinds ?? []) {
+    if (!KIND_RE.test(String(k))) err(SF, `kinds: "${k}" must match ${KIND_RE} — no one can declare an actor of this kind`);
+  }
+
+  // A dialect may not add these; the merge silently ignores them.
+  for (const key of ['refs', 'pathEvaluators']) {
+    if (steps?.[key]) warn(SF, `${key}: is not merged from a dialect — only the core language may define it`);
+  }
+}
+
 export function validatePluginDir(dir) {
   const errors = [];
   const warnings = [];
@@ -98,10 +170,24 @@ export function validatePluginDir(dir) {
   if (!m.description) warn(MF, 'description missing');
   if (!m.license) warn(MF, 'license missing');
 
-  // runtime + compose fragment
+  // A dialect-only plugin deploys nothing: it contributes vocabulary and the
+  // service it talks to belongs to some other plugin. `runtime: {}` with
+  // `provides: []` is the deliberate way to say so, so the runtime and
+  // capability checks below do not apply to it.
   const services = m.runtime?.services ?? {};
-  if (!m.runtime?.compose) {
-    err(MF, 'runtime.compose missing (path to the compose fragment)');
+  const dialectOnly = !!m.dialect
+    && !m.runtime?.compose
+    && Object.keys(services).length === 0;
+
+  // runtime + compose fragment
+  if (dialectOnly) {
+    if (Array.isArray(m.provides) && m.provides.length > 0) {
+      err(MF, 'declares no runtime but lists provides — a capability needs a service to serve it');
+    }
+  } else if (!m.runtime?.compose) {
+    err(MF, Object.keys(services).length > 0
+      ? 'runtime.compose missing — this plugin declares services but ships no compose fragment, so it cannot be deployed. That is the normal state for a spec-first plugin whose image does not exist yet; such a plugin is not ready for the registry. If it is meant to contribute vocabulary only, drop runtime.services and provides.'
+      : 'runtime.compose missing (path to the compose fragment)');
   } else if (!exists(m.runtime.compose)) {
     err(MF, `runtime.compose points to ${m.runtime.compose}, which does not exist`);
   } else {
@@ -121,7 +207,7 @@ export function validatePluginDir(dir) {
       }
     }
   }
-  if (Object.keys(services).length === 0) err(MF, 'runtime.services must declare at least one service');
+  if (!dialectOnly && Object.keys(services).length === 0) err(MF, 'runtime.services must declare at least one service');
   for (const [name, svc] of Object.entries(services)) {
     if (!svc?.image) err(MF, `runtime.services.${name}: image missing`);
     if (svc?.port == null) err(MF, `runtime.services.${name}: port missing`);
@@ -130,7 +216,7 @@ export function validatePluginDir(dir) {
 
   // provides / requires
   if (!Array.isArray(m.provides) || m.provides.length === 0) {
-    warn(MF, 'provides is empty — plugin registers no capabilities');
+    if (!dialectOnly) warn(MF, 'provides is empty — plugin registers no capabilities');
   } else {
     m.provides.forEach((p, i) => {
       for (const k of ['capability', 'uri', 'version', 'service', 'entrypoint']) {
@@ -184,6 +270,13 @@ export function validatePluginDir(dir) {
       try { comp = yaml.load(read(CF)); } catch (e) { err(CF, `YAML parse error: ${e.message}`); }
       if (comp) {
         for (const k of ['id', 'name', 'version']) if (!comp[k]) err(CF, `${k} missing`);
+        // sync-dialects names the synced folder after itb-plugin.yaml `name`,
+        // while the compiler keys kinds, types, `@dialect:` tags and
+        // enablement off component.yml `id`. If they differ, the dialect
+        // loads but none of those work, and nothing else reports it.
+        if (comp.id && m.name && String(comp.id) !== String(m.name)) {
+          err(CF, `id "${comp.id}" must equal itb-plugin.yaml name "${m.name}" — the sync uses the name for the folder and the compiler uses the id for kinds, types and @dialect: tags`);
+        }
         const lang = comp.language;
         let stepsFile = 'steps.yml';
         if (lang == null) {
@@ -205,16 +298,7 @@ export function validatePluginDir(dir) {
           } else {
             let steps;
             try { steps = yaml.load(read(SF)); } catch (e) { err(SF, `YAML parse error: ${e.message}`); }
-            const list = steps?.steps ?? (Array.isArray(steps) ? steps : null);
-            if (!Array.isArray(list) || list.length === 0) {
-              err(SF, 'no steps found (expected top-level `steps:` list)');
-            } else {
-              list.forEach((s, i) => {
-                if (!s?.match) { err(SF, `steps[${i}]: match missing`); return; }
-                try { new RegExp(s.match); } catch (e) { err(SF, `steps[${i}]: match is not a valid regex: ${e.message}`); }
-                if (!Array.isArray(s.actions) || s.actions.length === 0) err(SF, `steps[${i}] (${s.match}): actions missing`);
-              });
-            }
+            validateSteps(steps, SF, err, warn);
           }
         }
         for (const sc of comp.scriptlets ?? []) {
@@ -267,11 +351,60 @@ export function validateIndexDir(dir) {
     }
   }
   // every capability file must parse
-  if (fs.existsSync(path.join(dir, 'capabilities'))) {
-    for (const f of fs.readdirSync(path.join(dir, 'capabilities')).filter(f => /\.ya?ml$/.test(f))) {
-      try { yaml.load(read(path.join('capabilities', f))); } catch (e) { err(`capabilities/${f}`, `YAML parse error: ${e.message}`); }
+  const capDir = path.join(dir, 'capabilities');
+  const capFiles = fs.existsSync(capDir)
+    ? fs.readdirSync(capDir).filter(f => /\.ya?ml$/.test(f))
+    : [];
+  for (const f of capFiles) {
+    try { yaml.load(read(path.join('capabilities', f))); } catch (e) { err(`capabilities/${f}`, `YAML parse error: ${e.message}`); }
+  }
+  const defined = new Set(capFiles.map(f => f.replace(/\.ya?ml$/, '')));
+
+  // ── drift between the registry and what is actually on disk ────────
+  // Only runs when the plugin repos are checked out beside this one, which is
+  // true locally and false in the registry's own CI. Skipped, never failed,
+  // when they are absent — a CI run must not depend on a sibling checkout.
+  const parent = path.resolve(dir, '..');
+  const siblings = fs.existsSync(parent)
+    ? fs.readdirSync(parent, { withFileTypes: true })
+        .filter(e => e.isDirectory() && e.name.startsWith('itb-plugin-'))
+        .map(e => ({ name: e.name, dir: path.join(parent, e.name) }))
+        .filter(s => fs.existsSync(path.join(s.dir, 'itb-plugin.yaml')))
+    : [];
+
+  const used = new Set();
+  for (const p of Object.values(plugins)) for (const c of p?.provides ?? []) used.add(c);
+
+  if (siblings.length === 0) {
+    console.log('note  no plugin repos beside this one — on-disk cross-checks skipped');
+  } else {
+    for (const s of siblings) {
+      let sm;
+      try { sm = yaml.load(fs.readFileSync(path.join(s.dir, 'itb-plugin.yaml'), 'utf8')); } catch { continue; }
+      const key = String(sm?.name ?? '');
+      if (!key) continue;
+      if (!plugins[key]) {
+        err(IX, `plugin "${key}" exists at ${s.name}/ but is not listed — add it, or say why it is unpublished`);
+      } else if (sm.version && plugins[key].latest && String(sm.version) !== String(plugins[key].latest)) {
+        warn(IX, `${key}: index says latest ${plugins[key].latest}, the repo is at ${sm.version}`);
+      }
+      // A required capability nobody defines cannot be resolved at deploy time.
+      for (const r of sm?.requires ?? []) {
+        if (r?.capability) {
+          used.add(r.capability);
+          if (!defined.has(r.capability)) {
+            err(IX, `${key} requires capability "${r.capability}", which has no spec in capabilities/`);
+          }
+        }
+      }
+      for (const p of sm?.provides ?? []) if (p?.capability) used.add(p.capability);
     }
   }
+
+  for (const c of defined) {
+    if (!used.has(c)) warn(IX, `capability "${c}" is defined but no plugin provides or requires it`);
+  }
+
   return report(dir, errors, warnings);
 }
 
@@ -283,10 +416,39 @@ export function validateAny(dir) {
   return false;
 }
 
-// Standalone entrypoint: node src/registry-validate.mjs <dir> [<dir> …]
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const dirs = process.argv.slice(2).filter(a => !a.startsWith('--'));
+/** Report vendored copies of this file that have drifted from this one. */
+export function checkCopies(dirs) {
+  const selfPath = fileURLToPath(import.meta.url);
+  const self = fs.readFileSync(selfPath, 'utf8');
   let ok = true;
-  for (const d of dirs.length ? dirs : ['.']) ok = validateAny(d) && ok;
+  let found = 0;
+  for (const d of dirs) {
+    const copy = path.join(d, 'scripts', 'registry-validate.mjs');
+    if (!fs.existsSync(copy)) continue;
+    found++;
+    if (path.resolve(copy) === path.resolve(selfPath)) continue;
+    if (fs.readFileSync(copy, 'utf8') === self) {
+      console.log(`ok    ${copy}`);
+    } else {
+      console.log(`ERROR ${copy}: differs from the canonical copy — re-copy it`);
+      ok = false;
+    }
+  }
+  if (found === 0) console.log('note  no vendored copies found in the given directories');
+  return ok;
+}
+
+// Standalone entrypoint:
+//   node scripts/registry-validate.mjs <dir> [<dir> …]
+//   node scripts/registry-validate.mjs --check-copies <dir> [<dir> …]
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const dirs = args.filter(a => !a.startsWith('--'));
+  let ok = true;
+  if (args.includes('--check-copies')) {
+    ok = checkCopies(dirs.length ? dirs : ['.']);
+  } else {
+    for (const d of dirs.length ? dirs : ['.']) ok = validateAny(d) && ok;
+  }
   process.exit(ok ? 0 : 1);
 }

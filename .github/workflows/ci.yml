@@ -1,5 +1,14 @@
 name: ci
 on: [push, pull_request]
+
+env:
+  # Images are named for the service that runs, not for the plugin bundle:
+  # the bundle is this repo (manifest + compose + suite + dialect), and it
+  # ships more than one image. These names match the compose service names,
+  # so image, container, DNS name and logs all read the same.
+  VALIDATOR_IMAGE: ghcr.io/opentestbed/fhir-validator
+  DIALECT_IMAGE:   ghcr.io/opentestbed/fhir-validator-dialect
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -17,8 +26,134 @@ jobs:
       # is deferred until itb-cli grows that command — validating the manifest,
       # compose fragment rules, and dialect (incl. language versioning) is the
       # CI gate for now.
-  release:
-    if: startsWith(github.ref, 'refs/tags/')
+
+  # Both image jobs build on every push and PR so a broken Dockerfile fails
+  # fast, but publish only from main/v2 and from version tags. Neither runs
+  # unless the manifest validates — a published image should never come from a
+  # bundle that would be rejected by the registry.
+  validator-image:
     needs: validate
     runs-on: ubuntu-latest
-    steps: [{ name: Push GHCR image + GitHub release, run: echo TODO }]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match itb-plugin.yaml version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          manifest=$(grep -E '^version:' itb-plugin.yaml | awk '{print $2}')
+          tag=${GITHUB_REF_NAME#v}
+          if [ "$manifest" != "$tag" ]; then
+            echo "::error::tag v$tag does not match itb-plugin.yaml version $manifest"
+            exit 1
+          fi
+
+      # The jar lives at a stable URL whose contents are replaced in place, so
+      # the URL is not a usable cache key. Feed the asset's Last-Modified in as
+      # a build arg: unchanged jar reuses the cached layer, republished jar
+      # invalidates it. Without this a rebuild can silently ship a stale jar.
+      - name: Resolve validator jar and its mtime
+        id: jar
+        run: |
+          set -euo pipefail
+          url=$(grep -oE 'https://[^ "]*validator_cli\.jar' itb-plugin.yaml | head -1)
+          stamp=$(curl -sIL "$url" | grep -i '^last-modified:' | tail -1 | tr -d '\r' || true)
+          echo "url=$url"                >> "$GITHUB_OUTPUT"
+          echo "stamp=${stamp:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "Jar: $url ($stamp)"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.VALIDATOR_IMAGE }}
+          # `latest` is added automatically for non-prerelease semver tags.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,format=short
+            type=raw,value=edge,enable={{is_default_branch}}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v2' || startsWith(github.ref, 'refs/tags/v')) }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VALIDATOR_URL=${{ steps.jar.outputs.url }}
+            VALIDATOR_STAMP=${{ steps.jar.outputs.stamp }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest provenance
+        if: steps.build.outputs.digest != '' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.VALIDATOR_IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  dialect-image:
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DIALECT_IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,format=short
+            type=raw,value=edge,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.dialect
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v2' || startsWith(github.ref, 'refs/tags/v')) }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # TODO (unchanged from the previous stub): cut a GitHub release on tag with
+  # the bundle attached. Image publishing above no longer depends on it.

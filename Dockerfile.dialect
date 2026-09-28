@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+# The gherkin-dialect sidecar with dialect/ baked in, replacing the two relative
+# bind mounts in compose.plugin.yml — those resolve against the compose project
+# dir (itb-starter/), which breaks the moment the fragment is used from anywhere
+# else. Baking also makes the image tag the dialect version, which is what
+# ARCHITECTURE.md asks for: one tag covers runtime and language together.
+FROM nginx:1.27-alpine
+
+LABEL org.opencontainers.image.source=https://github.com/OpenTestBed/itb-plugin-fhir-validator \
+      org.opencontainers.image.description="Serves the fhir-validator Gherkin dialect at /gherkin-dialect" \
+      org.opencontainers.image.licenses=BSD-3-Clause
+
+COPY dialect-server.conf /etc/nginx/conf.d/default.conf
+COPY dialect/ /srv/dialect/
+
+EXPOSE 8080
+
+# busybox wget is present in the alpine base — same probe the fragment uses.
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/gherkin-dialect/component.yml || exit 1

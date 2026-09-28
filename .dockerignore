@@ -1,0 +1,14 @@
+# Neither image builds from most of the repo: the validator fetches its jar by
+# URL, the dialect image copies only dialect/ and dialect-server.conf. Keeping
+# the context small stops unrelated edits from busting the build cache.
+.git
+.github
+.claude
+scripts
+suite
+*.md
+compose.plugin.yml
+itb-plugin.yaml
+fhir-settings.json
+Dockerfile*
+.dockerignore
