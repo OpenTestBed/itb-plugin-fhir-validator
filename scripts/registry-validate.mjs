@@ -344,10 +344,40 @@ export function validateIndexDir(dir) {
     if (!NAME_RE.test(name)) err(IX, `plugin key "${name}" must match ${NAME_RE}`);
     if (!p?.repo || !/^https:\/\//.test(String(p.repo))) err(IX, `${name}: repo must be an https URL`);
     if (!p?.latest || !SEMVER_RE.test(String(p.latest))) err(IX, `${name}: latest must be semver (got ${JSON.stringify(p?.latest)})`);
-    if (!Array.isArray(p?.provides) || p.provides.length === 0) err(IX, `${name}: provides must be a non-empty list`);
+    // A dialect-only plugin deploys no service, so it can provide no
+    // capability: `provides: []` is the deliberate statement of that, exactly
+    // as it is in itb-plugin.yaml. Requiring a non-empty list here would make
+    // every vocabulary-only plugin unlistable.
+    const dialectOnly = p?.kind === 'dialect' || (p?.dialect === true && Array.isArray(p?.provides) && p.provides.length === 0);
+    if (!Array.isArray(p?.provides)) {
+      err(IX, `${name}: provides must be a list`);
+    } else if (p.provides.length === 0 && !dialectOnly) {
+      err(IX, `${name}: provides is empty — say kind: dialect if this plugin is vocabulary only`);
+    }
+    if (dialectOnly && p?.dialect !== true) {
+      err(IX, `${name}: kind: dialect but dialect: ${JSON.stringify(p?.dialect)} — a dialect-only plugin that ships no dialect is nothing`);
+    }
     for (const cap of p?.provides ?? []) {
       const cf = path.join('capabilities', `${cap}.yaml`);
       if (!exists(cf)) warn(IX, `${name}: capability "${cap}" has no spec file ${cf}`);
+    }
+    // requires: the capabilities this plugin needs someone else to provide.
+    // Unlike provides, a missing spec here is an ERROR: nothing can resolve a
+    // requirement at deploy time against a capability that is not defined.
+    if (p?.requires !== undefined) {
+      if (!Array.isArray(p.requires)) {
+        err(IX, `${name}: requires must be a list of capability names`);
+      } else {
+        for (const cap of p.requires) {
+          if (typeof cap !== 'string') {
+            err(IX, `${name}: requires entries are capability names, not ${JSON.stringify(cap)} — the uri and version live in the plugin's own itb-plugin.yaml`);
+            continue;
+          }
+          if (!exists(path.join('capabilities', `${cap}.yaml`))) {
+            err(IX, `${name}: requires capability "${cap}", which has no spec in capabilities/`);
+          }
+        }
+      }
     }
   }
   // every capability file must parse
@@ -373,7 +403,10 @@ export function validateIndexDir(dir) {
     : [];
 
   const used = new Set();
-  for (const p of Object.values(plugins)) for (const c of p?.provides ?? []) used.add(c);
+  for (const p of Object.values(plugins)) {
+    for (const c of p?.provides ?? []) used.add(c);
+    for (const c of p?.requires ?? []) if (typeof c === 'string') used.add(c);
+  }
 
   if (siblings.length === 0) {
     console.log('note  no plugin repos beside this one — on-disk cross-checks skipped');
@@ -389,13 +422,25 @@ export function validateIndexDir(dir) {
         warn(IX, `${key}: index says latest ${plugins[key].latest}, the repo is at ${sm.version}`);
       }
       // A required capability nobody defines cannot be resolved at deploy time.
+      const repoRequires = new Set();
       for (const r of sm?.requires ?? []) {
         if (r?.capability) {
+          repoRequires.add(r.capability);
           used.add(r.capability);
           if (!defined.has(r.capability)) {
             err(IX, `${key} requires capability "${r.capability}", which has no spec in capabilities/`);
           }
         }
+      }
+      // The index's requires list is a summary of the repo's, so a difference
+      // means one of the two is stale. The repo is authoritative — it is what
+      // a deploy actually reads — so the diagnostic points at the index.
+      const indexRequires = new Set((plugins[key]?.requires ?? []).filter(c => typeof c === 'string'));
+      for (const c of repoRequires) {
+        if (!indexRequires.has(c)) warn(IX, `${key}: the repo requires "${c}" but the index does not list it`);
+      }
+      for (const c of indexRequires) {
+        if (!repoRequires.has(c)) err(IX, `${key}: the index says it requires "${c}", but ${s.name}/itb-plugin.yaml does not`);
       }
       for (const p of sm?.provides ?? []) if (p?.capability) used.add(p.capability);
     }
