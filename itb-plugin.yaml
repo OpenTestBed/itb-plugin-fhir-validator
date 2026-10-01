@@ -28,12 +28,18 @@ endpoints:                       # → ITB domain parameters; suites use $DOMAIN
   fhirTransformer: http://fhir-validator:8080/itb/transform
   fhirPath:        http://fhir-validator:8080/itb/fhirPath
   igManager:       http://fhir-validator:8080/itb/igManager
+  matchetype:      http://fhir-validator:8080/itb/matchetype
   testDataGen:     http://fhir-validator:8080/itb/testdata
 
 provides:
   - { capability: fhir-validation,      uri: https://opentestbed.github.io/itb-plugins/capabilities/fhir-validation,      version: 1.0.0, service: fhir-validator, entrypoint: /itb/fhir }
   - { capability: fhir-transform,       uri: https://opentestbed.github.io/itb-plugins/capabilities/fhir-transform,       version: 1.0.0, service: fhir-validator, entrypoint: /itb/transform }
   - { capability: fhirpath-eval,        uri: https://opentestbed.github.io/itb-plugins/capabilities/fhirpath-eval,        version: 1.0.0, service: fhir-validator, entrypoint: /itb/fhirPath }
+  # Served, and called by the fhir-terminology dialect's `should match the
+  # pattern in` steps, but undeclared until now — so the registry showed
+  # fhir-terminology requiring a capability nobody provided. See
+  # itb-plugins/capabilities/fhir-matchetype.yaml for what it does not do yet.
+  - { capability: fhir-matchetype,      uri: https://opentestbed.github.io/itb-plugins/capabilities/fhir-matchetype,      version: 1.0.0, service: fhir-validator, entrypoint: /itb/matchetype }
   - { capability: test-data-generation, uri: https://opentestbed.github.io/itb-plugins/capabilities/test-data-generation, version: 1.0.0, service: fhir-validator, entrypoint: /itb/testdata }
 
 requires: []
