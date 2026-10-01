@@ -137,10 +137,23 @@ export function validateSteps(steps, SF, err, warn) {
     }
   });
 
-  // An actor kind that is not lower-kebab can never be written in a feature,
-  // because the core's `is a/an {kind}` sentence will not match it.
-  for (const k of steps?.kinds ?? []) {
-    if (!KIND_RE.test(String(k))) err(SF, `kinds: "${k}" must match ${KIND_RE} — no one can declare an actor of this kind`);
+  // `kinds:` must be a LIST. Written as a mapping it is valid YAML, so it gets
+  // past the parse and used to throw "object is not iterable" out of this very
+  // loop — the validator crashing instead of reporting is the worst outcome of
+  // all, since it reports nothing else either.
+  if (steps?.kinds !== undefined && !Array.isArray(steps.kinds)) {
+    err(SF, `kinds: must be a list, not a ${typeof steps.kinds === 'object' ? 'mapping' : typeof steps.kinds} — write "kinds: [${Object.keys(steps.kinds ?? {}).join(', ')}]"`);
+  } else {
+    // An actor kind that is not lower-kebab can never be written in a feature,
+    // because the core's `is a/an {kind}` sentence will not match it.
+    for (const k of steps?.kinds ?? []) {
+      if (!KIND_RE.test(String(k))) err(SF, `kinds: "${k}" must match ${KIND_RE} — no one can declare an actor of this kind`);
+    }
+  }
+  for (const key of ['verbs', 'steps']) {
+    if (steps?.[key] !== undefined && !Array.isArray(steps[key])) {
+      err(SF, `${key}: must be a list of entries, not a ${typeof steps[key] === 'object' ? 'mapping' : typeof steps[key]} — as a mapping it is ignored and none of its steps exist`);
+    }
   }
 
   // A dialect may not add these; the merge silently ignores them.
