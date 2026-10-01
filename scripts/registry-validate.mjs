@@ -374,6 +374,17 @@ export function validateIndexDir(dir) {
       const cf = path.join('capabilities', `${cap}.yaml`);
       if (!exists(cf)) warn(IX, `${name}: capability "${cap}" has no spec file ${cf}`);
     }
+    // `status: spec-only` is how an entry says "listed, but you cannot install
+    // this yet" — the escape the on-disk cross-check below already promises when
+    // it says "add it, or say why it is unpublished". It demands a reason,
+    // because an unexplained spec-only entry is just an entry nobody trusts.
+    if (p?.status !== undefined) {
+      if (!['published', 'spec-only'].includes(String(p.status))) {
+        err(IX, `${name}: status must be "published" or "spec-only" (got ${JSON.stringify(p.status)})`);
+      } else if (p.status === 'spec-only' && !String(p.reason ?? '').trim()) {
+        err(IX, `${name}: status: spec-only needs a reason: saying what is missing`);
+      }
+    }
     // requires: the capabilities this plugin needs someone else to provide.
     // Unlike provides, a missing spec here is an ERROR: nothing can resolve a
     // requirement at deploy time against a capability that is not defined.
