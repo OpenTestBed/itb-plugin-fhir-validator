@@ -1,6 +1,6 @@
 apiVersion: itb-plugins/v1
 name: fhir-validator
-version: 0.3.0
+version: 0.4.0
 description: HL7 FHIR validator (validate, transform, FHIRPath, test data) as GITB REST services
 homepage: https://github.com/OpenTestBed/itb-plugin-fhir-validator
 license: BSD-3-Clause
@@ -10,10 +10,9 @@ runtime:
   compose: compose.plugin.yml
   services:
     fhir-validator:
-      # Jar-download mode (current, mirrors itb-starter): eclipse-temurin base +
-      # VALIDATOR_URL release jar cached in a named volume. A prebuilt
-      # ghcr.io/opentestbed/fhir-validator image replaces this once CI publishes.
-      image: eclipse-temurin:17-jre
+      # Prebuilt image from the WorldHealthOrganization fork of org.hl7.fhir.core,
+      # until the ITB changes are merged into the core validator.
+      image: ghcr.io/worldhealthorganization/fhir-validator:ci-build
       port: 8080
       healthcheck: /itb/fhir/getModuleDefinition
     gherkin-dialect:
@@ -59,4 +58,4 @@ dialect:
 
 config:
   FHIR_VALIDATOR_JAVA_TOOL_OPTIONS: { default: "-Xmx8g", description: "MEOW + transitive deps can push past 4G" }
-  VALIDATOR_URL: { default: "https://github.com/costateixeira/org.hl7.fhir.core/releases/download/wip/validator_cli.jar", description: "Pin a specific validator build" }
+  FHIR_VALIDATOR_IMAGE: { default: "ghcr.io/worldhealthorganization/fhir-validator:ci-build", description: "Pin to an itb-rest-docker-image-<sha> tag for a reproducible deployment" }

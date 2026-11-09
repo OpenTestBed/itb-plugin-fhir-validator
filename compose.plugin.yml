@@ -1,49 +1,37 @@
 # Fragment rules: no host ports (use `itb plugins expose` for debugging),
 # no container_name, healthcheck required, env-only config.
 #
-# Current distribution mode (mirrors E:\work\itb-starter): the jar is downloaded
-# from the wip release into a named cache volume on first boot. A prebuilt
-# ghcr.io/opentestbed/fhir-validator image replaces this once plugin CI exists.
+# The validator is the prebuilt image from the WorldHealthOrganization fork of
+# org.hl7.fhir.core (its itb-rest-docker-image workflow), until the ITB changes
+# are merged into the core validator; then this points at the image the core
+# project publishes. ci-build is the latest build; set FHIR_VALIDATOR_IMAGE to
+# an itb-rest-docker-image-<sha> tag to pin.
 services:
   fhir-validator:
-    image: eclipse-temurin:17-jre
+    image: ${FHIR_VALIDATOR_IMAGE:-ghcr.io/worldhealthorganization/fhir-validator:ci-build}
     restart: unless-stopped
-    working_dir: /app
     volumes:
-      - fhir-validator-cache:/app
+      # Package cache; the image runs as the validator user, HOME=/home/validator.
+      - fhir-packages-cache:/home/validator/.fhir
       # Local package registry first (itb-plugin-package-server); unknown
       # packages fall through to the public servers. Path resolves against
       # the compose project dir (itb-starter/).
-      - ${FHIR_SETTINGS:-../itb-plugin-fhir-validator/fhir-settings.json}:/root/.fhir/fhir-settings.json:ro
+      - ${FHIR_SETTINGS:-../itb-plugin-fhir-validator/fhir-settings.json}:/home/validator/.fhir/fhir-settings.json:ro
     environment:
+      - FHIR_VERSION=4.0
       - JAVA_TOOL_OPTIONS=${FHIR_VALIDATOR_JAVA_TOOL_OPTIONS:--Xmx8g}
-      - VALIDATOR_URL=${VALIDATOR_URL:-https://github.com/costateixeira/org.hl7.fhir.core/releases/download/wip/validator_cli.jar}
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        set -e
-        JAR=/app/validator_cli.jar
-        if [ ! -s "$$JAR" ]; then
-          echo "Downloading validator jar from $$VALIDATOR_URL"
-          apt-get update -qq && apt-get install -y -qq --no-install-recommends curl ca-certificates
-          curl -fSL --retry 3 -o "$$JAR" "$$VALIDATOR_URL"
-        fi
-        exec java -jar "$$JAR" server 8080 -version 4.0 -allowNetworkAccess
     healthcheck:
-      # Java-only TCP healthcheck — works before curl is installed on first boot.
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET / HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q HTTP"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/itb/fhir/getModuleDefinition >/dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      # Cold start = apt + 180MB download + JVM warmup.
+      # JVM warmup and engine load.
       start_period: 300s
 
   # Self-describing dialect endpoint: serves dialect/ at the well-known
   # /gherkin-dialect path with CORS, so the authoring app can load the
   # language extension straight from the deployed service (no repo drift).
-  # Sidecar because validator_cli.jar cannot serve static files; folds into
-  # the main service once a prebuilt ghcr.io image exists.
+  # Sidecar because the validator image cannot serve static files.
   gherkin-dialect:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -57,4 +45,4 @@ services:
       timeout: 5s
       retries: 3
 volumes:
-  fhir-validator-cache:
+  fhir-packages-cache:
